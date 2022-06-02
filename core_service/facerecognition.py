@@ -3,14 +3,19 @@ import cv2
 import pandas as pd
 import numpy as np
 import mtcnn
+import datetime
 
 class Recognizer():
-    def __init__(self, facerecognition_model = "frozen_graph.pb", 
+    def __init__(self, 
+                        socketio,
+                        facerecognition_model = "frozen_graph.pb", 
                         labels_filename="labels.csv", 
                         facedetection_model="haarcascade_frontalface_default.xml",
                         use_mtcnn = False,
                         camera_src=0):
         
+        self.socketio = socketio
+
         if os.path.isfile(labels_filename) == False:
             raise Exception("Can't find %s" % labels_filename)
             
@@ -29,6 +34,16 @@ class Recognizer():
         self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
         self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
         self.layerOutput = self.net.getUnconnectedOutLayersNames()
+
+        self.curr_frame = None
+
+        self.label_stat = {}
+        self.label_count = {}
+        self.label_time = {}
+        for name in self.labels:
+            self.label_stat[name] = False
+            self.label_count[name] = 0
+            self.label_time[name] = datetime.datetime.now()
 
 
     def predict(self, frame):
@@ -52,10 +67,28 @@ class Recognizer():
             confidence = output[0].max(axis=1)[0]*100
 
             if confidence > 70:
-                label_text = "%s (%.2f %%)" % (self.labels[idx], confidence)
+                curr_label = self.labels[idx]
+                label_text = "%s (%.2f %%)" % (curr_label, confidence)
+                if self.label_count[curr_label] > 5:
+                    self.socketio.emit("prediction", {
+                                                    'frame' :self.get_curr_frame(),
+                                                    'label' : curr_label,
+                                                    'status' : not self.label_stat[curr_label],
+                                                    'time' : self.get_str_datetime()
+                                                    })
+                    self.socketio.sleep(0.1)
+                    self.label_stat[curr_label] = not self.label_stat[curr_label]
+                    self.label_time[curr_label] = datetime.datetime.now()
+                    self.label_count[curr_label] = 0
+                    
+                else :
+                    if self.check_diff_time(curr_label):
+                        self.label_count[curr_label] += 1
+
             else :
                 label_text = "N/A"
             frame = self.draw_ped(frame, label_text, x, y, x + w, y + h, color=(0,255,255), text_color=(50,50,50))
+            
             
         return frame
     
@@ -91,9 +124,10 @@ class Recognizer():
                 break
             else:
                 try :
+                    self.curr_frame = frame.copy()
                     frame = self.predict(frame)
-                except :
-                    print("[ERROR] Can't recognize the face.")
+                except Exception as e:
+                    print("[ERROR] ", e)
                     self.camera.release()
                     self.camera = None
                     break
@@ -114,3 +148,17 @@ class Recognizer():
 
     def status(self):
         return self.camera is not None
+
+    def get_curr_frame(self):
+        frame = cv2.resize(self.curr_frame, (0,0), fx=0.2, fy=0.2)
+        ret, buffer = cv2.imencode('.png', frame)
+        return buffer.tobytes()
+
+    def get_str_datetime(self):
+        return datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    def check_diff_time(self, label):
+        label_time = self.label_time[label]
+        now = datetime.datetime.now()
+
+        return now - label_time > datetime.timedelta(seconds=5)

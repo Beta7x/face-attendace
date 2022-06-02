@@ -10,13 +10,37 @@ app.config['SECRET_KEY'] = 'qwerty123'
 socketio = SocketIO(app)
 
 PATH = '/'.join(os.path.abspath(__file__).split('/')[0:-1])
+DATASET_PATH = os.path.join(PATH, 'dataset')
+
 recognizer = Recognizer(
+    socketio=socketio,
     facerecognition_model = os.path.join(PATH, "core_service/bin/frozen_graph.pb"),
     labels_filename = os.path.join(PATH, "core_service/labels.csv"),
     facedetection_model = os.path.join(PATH, "core_service/bin/haarcascade_frontalface_default.xml"),
     use_mtcnn=False,
     camera_src=0
 )
+
+@app.route('/upload_photo', methods=['POST'])
+def upload_photo():
+    class_name = request.args.get('class_name')
+    path_new_class = os.path.join(DATASET_PATH, class_name)
+    
+    # create directory label if not exist
+    if not os.path.exists(path_new_class):
+        os.mkdir(path_new_class)
+        
+    # save uploaded image
+    filename = class_name + '%04d.jpg' % (len(os.listdir(path_new_class)) + 1)
+    file = request.files['webcam']
+    file.save(os.path.join(path_new_class, filename))
+    
+    # resize image
+    img = cv2.imread(os.path.join(path_new_class, filename))
+    img = cv2.resize(img, (250, 250))
+    cv2.imwrite(os.path.join(path_new_class, filename), img)
+
+    return '', 200
 
 @app.route('/video_feed')
 def video_feed():
@@ -44,11 +68,11 @@ def history():
 def face_registration():
     return render_template("face_registration.html")
 
-@socketio.on('server_event')
-def handle_message(message):
-    print('receive message: ', message)
-    time.sleep(1)
-    socketio.emit('client_event', "Hello from server :)")
+# @socketio.on('server_event')
+# def handle_message(message):
+#     print('receive message: ', message)
+#     time.sleep(1)
+#     socketio.emit('client_event', "Hello from server :)")
 
 if __name__ == '__main__':
     app.run(debug=True)
