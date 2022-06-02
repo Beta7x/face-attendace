@@ -8,6 +8,7 @@ import datetime
 class Recognizer():
     def __init__(self, 
                         socketio,
+                        # facerecognition_model = "frozen_graph_02062022_195029",
                         facerecognition_model = "frozen_graph.pb", 
                         labels_filename="labels.csv", 
                         facedetection_model="haarcascade_frontalface_default.xml",
